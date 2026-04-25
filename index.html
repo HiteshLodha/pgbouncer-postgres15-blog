@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PgBouncer + PostgreSQL 15: The Silent Breaking Change Nobody Told Us About</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --ink: #1a1a2e; --paper: #f5f0e8; --accent: #c0392b;
+    --accent2: #e67e22; --muted: #6b6560; --code-bg: #0f0f1a;
+    --code-text: #e8d5b0; --border: #d4c9b0; --white: #fff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--paper); color: var(--ink); font-family: 'Source Serif 4', Georgia, serif; font-weight: 300; line-height: 1.82; }
+
+  .masthead { background: var(--ink); color: var(--paper); padding: 48px 32px 38px; text-align: center; position: relative; }
+  .masthead::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 5px; background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent)); }
+  .tag-line { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--accent2); margin-bottom: 18px; }
+  .masthead h1 { font-family: 'Playfair Display', serif; font-size: clamp(26px, 5vw, 50px); font-weight: 900; line-height: 1.12; max-width: 800px; margin: 0 auto 18px; }
+  .masthead h1 span { color: var(--accent2); font-style: italic; }
+  .meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #777; letter-spacing: 2px; text-transform: uppercase; }
+
+  .article { max-width: 720px; margin: 0 auto; padding: 52px 24px 80px; }
+
+  .lead-para::first-letter { font-family: 'Playfair Display', serif; font-size: 72px; font-weight: 900; float: left; line-height: 0.72; margin: 10px 12px 0 0; color: var(--accent); }
+  .lead-para { font-size: 19px; font-weight: 400; line-height: 1.82; margin-bottom: 28px; color: #222; }
+  p { font-size: 16px; margin-bottom: 22px; color: #2a2a2a; }
+  h2 { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; margin: 48px 0 14px; color: var(--ink); position: relative; padding-left: 20px; }
+  h2::before { content: ''; position: absolute; left: 0; top: 4px; bottom: 4px; width: 5px; background: var(--accent); border-radius: 2px; }
+  h3 { font-family: 'Playfair Display', serif; font-size: 19px; font-weight: 700; margin: 28px 0 10px; color: var(--ink); }
+  code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #e8e0d0; padding: 2px 5px; border-radius: 3px; color: var(--accent); }
+  strong { font-weight: 600; }
+
+  .pull-quote { border-left: 5px solid var(--accent); background: var(--white); padding: 24px 32px; margin: 36px 0; position: relative; box-shadow: 3px 3px 0 var(--border); }
+  .pull-quote::before { content: '"'; font-family: 'Playfair Display', serif; font-size: 90px; color: var(--accent); opacity: 0.1; position: absolute; top: -12px; left: 14px; line-height: 1; }
+  .pull-quote p { font-family: 'Playfair Display', serif; font-size: 19px; font-style: italic; font-weight: 700; color: var(--ink); line-height: 1.5; margin: 0; }
+
+  .timeline { background: var(--ink); border-radius: 6px; padding: 28px; margin: 32px 0; color: var(--paper); }
+  .timeline-title { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent2); margin-bottom: 22px; }
+  .timeline-item { display: flex; gap: 18px; margin-bottom: 22px; position: relative; }
+  .timeline-item:not(:last-child)::after { content: ''; position: absolute; left: 52px; top: 34px; bottom: -22px; width: 1px; background: #2a2a4a; }
+  .timeline-year { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--accent2); min-width: 78px; padding-top: 2px; }
+  .timeline-content strong { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; color: var(--paper); }
+  .timeline-content span { font-size: 12px; color: #aaa; line-height: 1.55; }
+  .timeline-item.danger .timeline-year { color: #f87171; }
+  .timeline-item.danger strong { color: #f87171 !important; }
+
+  .code-block { background: var(--code-bg); border-radius: 6px; padding: 22px; margin: 22px 0; overflow-x: auto; border-left: 4px solid var(--accent2); }
+  .code-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent2); margin-bottom: 12px; }
+  .code-block pre { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--code-text); line-height: 1.85; white-space: pre; margin: 0; }
+  .cm { color: #6b7280; } .kw { color: #f59e0b; } .st { color: #86efac; } .ok { color: #4ade80; } .er { color: #f87171; } .hl { color: #fbbf24; }
+
+  .callout { border-radius: 4px; padding: 18px 22px; margin: 24px 0; display: flex; gap: 14px; align-items: flex-start; border: 1px solid transparent; }
+  .callout.warning { background: #fff8e6; border-color: #f59e0b; }
+  .callout.success { background: #f0fdf4; border-color: #4ade80; }
+  .callout.info    { background: #eff6ff; border-color: #60a5fa; }
+  .callout.danger  { background: #fef2f2; border-color: #f87171; }
+  .callout-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+  .callout p { font-size: 14px; margin: 0; color: #1a1a2e; line-height: 1.65; }
+  .callout p strong { display: block; font-weight: 700; margin-bottom: 4px; }
+
+  .compare-table { width: 100%; border-collapse: collapse; margin: 22px 0; font-size: 13px; }
+  .compare-table th { background: var(--ink); color: var(--paper); padding: 10px 14px; text-align: left; font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .compare-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+  .compare-table tr:nth-child(even) td { background: #f0ead8; }
+  .compare-table .yes { color: #16a34a; font-weight: 600; }
+  .compare-table .no  { color: #dc2626; font-weight: 600; }
+
+  .auth-flow { background: var(--white); border: 1px solid var(--border); border-radius: 6px; padding: 24px; margin: 26px 0; font-family: 'JetBrains Mono', monospace; }
+  .auth-flow-title { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .flow-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .flow-box { background: var(--ink); color: var(--paper); padding: 7px 12px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+  .flow-box.green { background: #15803d; } .flow-box.orange { background: #c2410c; }
+  .flow-arrow { color: var(--muted); font-size: 14px; }
+  .flow-note { font-size: 10px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+
+  .version-bar { display: flex; margin: 22px 0; border-radius: 6px; overflow: hidden; font-family: 'JetBrains Mono', monospace; }
+  .version-block { flex: 1; padding: 14px 8px; text-align: center; color: white; }
+  .version-block .ver { font-size: 16px; font-weight: 700; margin-bottom: 3px; }
+  .version-block .def { font-size: 9px; letter-spacing: 0.5px; opacity: 0.8; line-height: 1.4; }
+  .version-block.v10 { background: #374151; } .version-block.v12 { background: #1e3a5f; }
+  .version-block.v14 { background: #7c3aed; } .version-block.v15 { background: #991b1b; }
+  .version-block.v16 { background: #7f1d1d; }
+
+  .checklist { list-style: none; margin: 18px 0 26px; padding: 0; }
+  .checklist li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 15px; line-height: 1.55; }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist li::before { content: '→'; color: var(--accent); font-family: 'JetBrains Mono', monospace; font-weight: 600; flex-shrink: 0; margin-top: 1px; }
+
+  .key-lesson { background: var(--accent); color: var(--white); padding: 30px; border-radius: 6px; margin: 38px 0; text-align: center; }
+  .key-lesson .lesson-label { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 4px; text-transform: uppercase; opacity: 0.75; margin-bottom: 12px; }
+  .key-lesson p { font-family: 'Playfair Display', serif; font-size: 20px; font-style: italic; font-weight: 700; color: var(--white); line-height: 1.5; margin: 0; }
+
+  .faq-item { border: 1px solid var(--border); border-radius: 4px; margin-bottom: 12px; overflow: hidden; }
+  .faq-q { background: var(--white); padding: 15px 18px; font-weight: 600; font-size: 15px; display: flex; gap: 10px; align-items: flex-start; }
+  .faq-q::before { content: 'Q'; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: var(--accent); color: white; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; margin-top: 2px; }
+  .faq-a { background: #faf7f0; padding: 13px 18px 15px 46px; font-size: 14px; border-top: 1px solid var(--border); line-height: 1.7; color: #2a2a2a; }
+
+  .divider { display: flex; align-items: center; gap: 14px; margin: 40px 0; color: var(--muted); }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .divider span { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 3px; text-transform: uppercase; }
+
+  .footer { background: var(--ink); color: #555; text-align: center; padding: 28px; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 2px; }
+  .footer strong { display: block; color: var(--paper); font-size: 12px; margin-bottom: 6px; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .masthead { animation: fadeUp 0.5s ease both; }
+  .article  { animation: fadeUp 0.5s ease 0.12s both; }
+
+  @media (max-width: 600px) {
+    .masthead { padding: 32px 18px 26px; }
+    h2 { font-size: 21px; }
+    .version-bar { flex-direction: column; }
+    .flow-row { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="tag-line">SRE War Story · PostgreSQL · PgBouncer · Cloud SQL</div>
+  <h1>PgBouncer + PostgreSQL 15:<br/><span>The Silent Breaking Change</span><br/>Nobody Told Us About</h1>
+  <div class="meta">Production Incident Deep-Dive &nbsp;·&nbsp; 2025 &nbsp;·&nbsp; SRE Engineering</div>
+</header>
+
+<article class="article">
+
+  <p class="lead-para">Everything was running smoothly. PgBouncer and PostgreSQL had been humming along in production for years. Then one routine password reset later — database connections started failing across the board. No deployment. No config change. Just a password reset.</p>
+
+  <p>This is a story about a deceptive class of production failures: changes that appear completely safe, but leave a hidden tripwire that triggers weeks or months later. Here is the full breakdown of what happened and how you can prevent it.</p>
+
+  <div class="pull-quote">
+    <p>The migration did not break it. Resetting the password on PostgreSQL 15 — without knowing about a silent default change — did.</p>
+  </div>
+
+  <!-- 1 -->
+  <h2>The Architecture</h2>
+
+  <p>A standard pattern: <strong>PgBouncer</strong> connection pooler in front of a <strong>Cloud SQL PostgreSQL</strong> instance on GCP. Applications connect through PgBouncer, which pools and multiplexes connections efficiently — preventing PostgreSQL from spawning a new OS process per client.</p>
+
+  <div class="auth-flow">
+    <div class="auth-flow-title">// Connection flow</div>
+    <div class="flow-row">
+      <div class="flow-box">App Pods</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box orange">PgBouncer :6432</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-box green">Cloud SQL PG :5432</div>
+    </div>
+    <div class="flow-note">
+      ① App authenticates to PgBouncer (MD5)<br/>
+      ② PgBouncer authenticates to PostgreSQL (MD5)<br/>
+      ③ PostgreSQL checks pg_shadow — hash format must match auth method
+    </div>
+  </div>
+
+  <p>Critical detail: the PgBouncer in use was a <strong>standard managed image</strong> — no access to <code>pgbouncer.ini</code> or <code>userlist.txt</code>. The image is sealed. This constraint becomes the central challenge when things break.</p>
+
+  <!-- 2 -->
+  <h2>How PgBouncer Auth Works</h2>
+
+  <p>PgBouncer has two separate auth interactions. First, it authenticates incoming app connections against its own <code>userlist.txt</code> using the <code>auth_type</code> in <code>pgbouncer.ini</code>. Second, it connects to PostgreSQL as a service account — also using that same <code>auth_type</code>. This backend connection is what broke.</p>
+
+  <div class="code-block">
+    <div class="code-label">// pgbouncer.ini — key setting</div>
+    <pre>[pgbouncer]
+<span class="hl">auth_type         = md5</span>    <span class="cm">← PgBouncer speaks MD5 to PostgreSQL</span>
+auth_file         = /etc/pgbouncer/userlist.txt
+pool_mode         = transaction
+max_client_conn   = 200</pre>
+  </div>
+
+  <p>With <code>auth_type = md5</code>, PgBouncer sends an MD5 hash to PostgreSQL. PostgreSQL checks the stored hash format in <code>pg_shadow</code>. If the stored format is MD5 — connection succeeds. If stored format is SCRAM — mismatch, connection rejected.</p>
+
+  <!-- 3 -->
+  <h2>MD5 vs SCRAM-SHA-256</h2>
+
+  <p><strong>MD5</strong> computes <code>MD5(password + username)</code> — simple, stateless, universally supported. No salt. No replay protection. Cryptographically weak by modern standards.</p>
+
+  <p><strong>SCRAM-SHA-256</strong> is a 4-step challenge-response protocol (RFC 5802). The password never travels over the wire. Uses PBKDF2 with a random salt and iteration count. Provides mutual authentication. Far more secure — but requires both client and server to support it.</p>
+
+  <table class="compare-table">
+    <thead><tr><th>Property</th><th>MD5</th><th>SCRAM-SHA-256</th></tr></thead>
+    <tbody>
+      <tr><td>Password over wire</td><td class="no">Hash sent</td><td class="yes">Never sent</td></tr>
+      <tr><td>Salt</td><td class="no">None</td><td class="yes">Random per user</td></tr>
+      <tr><td>Replay protection</td><td class="no">No</td><td class="yes">Yes (nonces)</td></tr>
+      <tr><td>Mutual auth</td><td class="no">No</td><td class="yes">Yes</td></tr>
+      <tr><td>Brute-force resistance</td><td class="no">Weak</td><td class="yes">Strong (PBKDF2)</td></tr>
+      <tr><td>PgBouncer standard image</td><td class="yes">Supported</td><td class="no">Not in older images</td></tr>
+      <tr><td>PostgreSQL default since</td><td>PG ≤ 13</td><td>PG 14+</td></tr>
+    </tbody>
+  </table>
+
+  <!-- 4 -->
+  <h2>How the Default Changed Across Versions</h2>
+
+  <p>The <code>password_encryption</code> parameter controls how new passwords are stored. PostgreSQL changed its default at PG 14. Anyone migrating from PG 12 directly to PG 15 crossed this boundary in a single jump — making the change especially invisible.</p>
+
+  <div class="version-bar">
+    <div class="version-block v10"><div class="ver">PG 10</div><div class="def">SCRAM introduced (optional)</div></div>
+    <div class="version-block v12"><div class="ver">PG 12</div><div class="def">Default: MD5</div></div>
+    <div class="version-block v14"><div class="ver">PG 14</div><div class="def">Default changed to SCRAM</div></div>
+    <div class="version-block v15"><div class="ver">PG 15</div><div class="def">Default: SCRAM (standard)</div></div>
+    <div class="version-block v16"><div class="ver">PG 16+</div><div class="def">Default: SCRAM (enforced)</div></div>
+  </div>
+
+  <div class="code-block">
+    <div class="code-label">// Check what your instance uses</div>
+    <pre><span class="kw">SHOW</span> password_encryption;
+<span class="cm">-- PG 12:  md5
+-- PG 15:  scram-sha-256   ← silent change after migration</span></pre>
+  </div>
+
+  <!-- 5 -->
+  <h2>The Incident Timeline</h2>
+
+  <div class="timeline">
+    <div class="timeline-title">// Production Timeline</div>
+    <div class="timeline-item">
+      <div class="timeline-year">2021</div>
+      <div class="timeline-content">
+        <strong>Initial Setup — PostgreSQL 12</strong>
+        <span>Password set on PG 12. Default: MD5. Hash stored as MD5 in pg_shadow. PgBouncer auth_type = MD5. Perfect alignment. System runs smoothly for years.</span>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-year">Jan 2025</div>
+      <div class="timeline-content">
+        <strong>Migration — PG 12 → PG 15</strong>
+        <span>Instance upgraded to PG 15. Existing password hashes carried over as-is — still MD5. PgBouncer continues working fine. Migration declared successful. Nobody notices the default has changed.</span>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-year">Post-migration</div>
+      <div class="timeline-content">
+        <strong>Hidden Time Bomb Ticking</strong>
+        <span>System runs smoothly on PG 15 for weeks. Old MD5 hash still works. Everything looks green. But SHOW password_encryption now returns scram-sha-256. The trap is set.</span>
+      </div>
+    </div>
+    <div class="timeline-item danger">
+      <div class="timeline-year">2025 ⚠️</div>
+      <div class="timeline-content">
+        <strong>Routine Password Reset — Connections Fail</strong>
+        <span>Service account password reset on PG 15. PG 15 applies its default: SCRAM-SHA-256. New hash stored as SCRAM. PgBouncer sends MD5 auth → PostgreSQL sees SCRAM hash → format mismatch → connection rejected. Incident declared.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6 -->
+  <h2>Why the Migration Looked Safe</h2>
+
+  <p>When PostgreSQL upgrades to a new major version, it carries existing <code>pg_shadow</code> hashes over byte-for-byte. It does not rehash them. The old MD5 hash from 2021 survived perfectly on PG 15 — until a password reset forced a new hash to be written using the new default.</p>
+
+  <div class="code-block">
+    <div class="code-label">// pg_shadow — before vs after password reset on PG 15</div>
+    <pre><span class="cm">-- Right after migration (PG 15 running, old hash intact):</span>
+ bouncer_user | <span class="ok">md5</span>a1b2c3d4e5f67890...   <span class="cm">← PgBouncer happy ✅</span>
+
+<span class="cm">-- After password reset on PG 15 (new default kicks in):</span>
+ bouncer_user | <span class="er">SCRAM-SHA-256</span>$4096:...  <span class="cm">← PgBouncer fails ❌</span></pre>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-icon">⚠️</div>
+    <p><strong>The Hidden Time Bomb</strong><br/>After a major PG upgrade across the 13/14 boundary, the system appears healthy — old hashes still work. But the moment anyone resets a password, it gets stored in SCRAM. If your connection pooler only speaks MD5, that is when everything breaks.</p>
+  </div>
+
+  <!-- 7 -->
+  <h2>Why You Cannot Always Fix PgBouncer</h2>
+
+  <p>The obvious answer is: update PgBouncer to use SCRAM. Modern PgBouncer (1.16+) fully supports it. But when you are on a <strong>standard sealed image</strong> — a sidecar from a platform team or managed service — there is no access to its config files. No SSH. No file edits. The image is read-only by design.</p>
+
+  <div class="callout info">
+    <div class="callout-icon">💡</div>
+    <p><strong>Accepted SRE Pattern</strong><br/>When you cannot change the middleware, adapt the database to the middleware's constraints. This is not a hack — it is the pragmatic decision when you only have one lever. Use it.</p>
+  </div>
+
+  <!-- 8 -->
+  <h2>The Fix: Step-by-Step</h2>
+
+  <p>Two steps. Both mandatory. Skipping either one means the problem returns on the next password reset.</p>
+
+  <h3>Step 1 — Force MD5 on the PostgreSQL Instance</h3>
+
+  <div class="code-block">
+    <div class="code-label">// Via gcloud CLI</div>
+    <pre>gcloud sql instances patch YOUR_INSTANCE \
+  --database-flags <span class="hl">password_encryption=md5</span></pre>
+  </div>
+
+  <p>Or via Cloud Console: <strong>Cloud SQL → Edit → Flags → Add → <code>password_encryption = md5</code> → Save.</strong></p>
+
+  <h3>Step 2 — Reset the Password After the Flag is Applied</h3>
+
+  <div class="code-block">
+    <div class="code-label">// Rewrite the hash as MD5</div>
+    <pre><span class="kw">ALTER USER</span> bouncer_user <span class="kw">WITH PASSWORD</span> <span class="st">'your_password'</span>;
+<span class="cm">-- Must run AFTER the flag is active — flag alone does not rehash existing passwords</span></pre>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-icon">🔴</div>
+    <p><strong>Step 2 is not optional.</strong> The flag only affects future passwords. The existing SCRAM hash stays in <code>pg_shadow</code> until you explicitly reset the password. Always do both steps in order.</p>
+  </div>
+
+  <h3>Step 3 — Verify</h3>
+
+  <div class="code-block">
+    <div class="code-label">// Confirm hash format</div>
+    <pre><span class="kw">SELECT</span> usename, passwd <span class="kw">FROM</span> pg_shadow <span class="kw">WHERE</span> usename = <span class="st">'bouncer_user'</span>;
+
+<span class="cm">-- ✅ Good:</span>  bouncer_user | <span class="ok">md5</span>a1b2c3d4e5f67890...
+<span class="cm">-- ❌ Bad:</span>   bouncer_user | <span class="er">SCRAM-SHA-256</span>$4096:abc...  ← Step 2 not done</pre>
+  </div>
+
+  <!-- 9 -->
+  <h2>Pre-Emptive Checklist</h2>
+
+  <ul class="checklist">
+    <li>Run <code>SHOW password_encryption;</code> on every PG 14+ instance — if it returns <code>scram-sha-256</code>, assess whether all clients support SCRAM</li>
+    <li>Audit hash formats: <code>SELECT usename, left(passwd, 25) FROM pg_shadow;</code> — look for <code>SCRAM-SHA-256$</code> on service accounts used by MD5-only clients</li>
+    <li>After any major PG version upgrade, set <code>password_encryption</code> explicitly before allowing any password resets</li>
+    <li>Document your PgBouncer image type (sealed vs custom) — this defines your options during incidents</li>
+    <li>Add a pg_shadow hash format check to every post-migration validation checklist</li>
+    <li>If upgrading PgBouncer to 1.16+, migrate in correct order: update PgBouncer first, then switch the DB default, then reset passwords</li>
+  </ul>
+
+  <!-- 10 -->
+  <h2>The Broader SRE Lesson</h2>
+
+  <p>This incident belongs to a tricky failure category: <strong>delayed-impact changes</strong>. The root cause was introduced during the migration. But it caused no immediate failure — no alerts, no broken tests. The system looked healthy for weeks.</p>
+
+  <p>The failure only materialized when a completely unrelated task triggered the hidden mismatch. From the perspective of whoever reset the password, they changed nothing architectural. From the system's perspective, they had just pulled the pin on a grenade that had been sitting there since January.</p>
+
+  <div class="callout success">
+    <div class="callout-icon">✅</div>
+    <p><strong>Key SRE Instinct</strong><br/>When something breaks after a routine operation — not after a major change — ask: what changed silently during the last major change that only now manifested? The root cause is almost always hiding in that gap. Look backwards, not just at the most recent event.</p>
+  </div>
+
+  <p>A migration that appears successful is not the same as a migration that has been fully validated. Part of completing a major version upgrade is explicitly asking: <em>"What assumptions has this system been running on, and are any of them now silently false?"</em></p>
+
+  <div class="key-lesson">
+    <div class="lesson-label">The Core Lesson</div>
+    <p>The migration looked safe because old hashes were preserved. But every password reset after the upgrade silently used the new default. Check your defaults. Document your constraints. Never assume a smooth migration means nothing changed under the hood.</p>
+  </div>
+
+  <!-- 11 -->
+  <h2>Frequently Asked Questions</h2>
+
+  <div class="faq-item">
+    <div class="faq-q">Does setting password_encryption = md5 affect existing passwords?</div>
+    <div class="faq-a">No. The flag only affects passwords set or reset after it is applied. Existing hashes in <code>pg_shadow</code> are untouched — which is exactly why Step 2 (resetting the password after the flag change) is mandatory.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">Is using MD5 a security risk?</div>
+    <div class="faq-a">MD5 is weaker than SCRAM, but on private internal networks with VPC and firewall rules, the practical risk is low. Treat MD5 as a temporary workaround while planning a proper SCRAM migration — not a permanent state.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">Is this Cloud SQL-specific or does it affect all PostgreSQL?</div>
+    <div class="faq-a">Any PostgreSQL 14+ instance — Cloud SQL, RDS, Azure Database, or self-hosted. The <code>password_encryption</code> default change is a core PostgreSQL behavior. Cloud SQL surfaces it as a database flag; self-hosted requires editing <code>postgresql.conf</code> and running <code>pg_reload_conf()</code>.</div>
+  </div>
+  <div class="faq-item">
+    <div class="faq-q">How do I migrate to SCRAM properly?</div>
+    <div class="faq-a">Correct order: (1) Upgrade PgBouncer to 1.16+ with SCRAM support. (2) Set <code>auth_type = scram-sha-256</code> in pgbouncer.ini. (3) Set <code>password_encryption = scram-sha-256</code> on PostgreSQL. (4) Reset all service account passwords. (5) Verify via pg_shadow. Always update the client before changing the server default — never the reverse.</div>
+  </div>
+
+  <div class="divider"><span>Closing</span></div>
+
+  <p>Incidents from silent default changes are among the hardest to diagnose because the root cause happened long before the failure, and the trigger looks unrelated. The standard SRE instinct — look at what changed most recently — leads you in the wrong direction.</p>
+
+  <p>Check your <code>pg_shadow</code>. Run <code>SHOW password_encryption</code> on your instances. Add a hash format audit to your post-migration checklist. The migration will look smooth — the first password reset after it might not, unless you are already prepared.</p>
+
+  <div class="divider"><span>End</span></div>
+
+</article>
+
+<footer class="footer">
+  <strong>SRE Engineering · Production Incident Deep-Dive · 2025</strong>
+  POSTGRESQL &nbsp;·&nbsp; PGBOUNCER &nbsp;·&nbsp; CLOUD SQL &nbsp;·&nbsp; GCP &nbsp;·&nbsp; DATABASE RELIABILITY
+</footer>
+
+</body>
+</html>
